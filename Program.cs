@@ -1,7 +1,7 @@
 ﻿using System;
+using System.IO;
 using System.Threading.Tasks;
 using System.Security.Cryptography;
-
 using Amazon.KeyManagementService;
 using Amazon.KeyManagementService.Model;
 
@@ -10,96 +10,146 @@ namespace dotnetSignDocExample
   class Program
   {
     private const string messageType = "DIGEST";
-    private static FileStream? fStream;
-    private static MemoryStream? signature;
+    private const string digestDocExtension = "digest.bin";
+    private const string signatureDocExtension = "sign.bin";
+    private static string? KMSKeyId;
+    private static string? SignAlgorithm;
+    
     public static async Task Main(string[] args)
     {
-      // check env vars
-      var KMSKeyId = Environment.GetEnvironmentVariable("KMS_KEY_ID");
-      envVarValidate(KMSKeyId);
-      var SignAlgorithm = Environment.GetEnvironmentVariable("KMS_SIGNING_ALG");
-      envVarValidate(SignAlgorithm);
+      // chequea env vars
+      KMSKeyId = Environment.GetEnvironmentVariable("KMS_KEY_ID");
+      validateEnvVar(KMSKeyId);
+      SignAlgorithm = Environment.GetEnvironmentVariable("KMS_SIGNING_ALG");
+      validateEnvVar(SignAlgorithm);
       
-      // read doc
-      string fPath = Path.Combine(Environment.CurrentDirectory, "message.txt");
-      if (!File.Exists(fPath)){
-        Console.WriteLine("doc doesn't exist");
-        Environment.Exit(1);
-      }
-      fStream = File.OpenRead(fPath);
-      Console.WriteLine("read doc successfully");
-      
-      // hash doc
-      SHA256 sha256 = SHA256.Create();
-      byte[] digestBin = sha256.ComputeHash(fStream);
-      Console.WriteLine("hashed doc successfully");
-      
-      // set AWS KMS Client
+      // configura el cliente de AWS KMS
       var client = new AmazonKeyManagementServiceClient();
-      
-      // sign doc
-      try
-      {
-        var req = new SignRequest
-        {
-          KeyId = KMSKeyId,
-          Message = new MemoryStream(digestBin),
-          MessageType = messageType,
-          SigningAlgorithm = SignAlgorithm,
-        };
-        var response = await client.SignAsync(req);
-        string keyId = response.KeyId;
-        signature = response.Signature;
-        string signingAlgorithm = response.SigningAlgorithm;
-        
-        // write out signature file
-        if (signature is null){
-          throw new ArgumentNullException(nameof(signature));
-        }
-        using (FileStream fs = new FileStream("sign.bin", FileMode.Create, FileAccess.Write))
-        {
-          signature.WriteTo(fs);
-          fs.Close();
-        }
-        Console.WriteLine("signed doc successfully");
-      }
-      catch (Exception e)
-      {
-        Console.WriteLine("{0} Exception caught", e);
-        Environment.Exit(1);
-      }
 
-      // // validate signature
-      // try
-      // {
-      //   var req = new VerifyRequest
-      //   {
-      //     KeyId = KMSKeyId,
-      //     Message = new MemoryStream(), //TODO: read digest file
-      //     MessageType = messageType,
-      //     Signature = new MemoryStream(), //TODO: read from signature file
-      //     SigningAlgorithm = SignAlgorithm,
-      //   };
-      //   var response = await client.VerifyAsync(req);
-      //   Console.WriteLine("signature valid: {0}", response.SignatureValid);
-      // }
-      // catch (Exception e)
-      // {
-      //   Console.WriteLine("{0} Exception caught", e);
-      //   Environment.Exit(1);
-      // }
+      Task<string> sd = signDoc(client, "message.txt");
+      _ = await sd;
+      // verifyDocSignature(client, "message.txt");
     }
 
-    // private static void firmarDoc()
-    // {
-
-    // }
-    private static void envVarValidate(string? envVar)
+    /// dado el nombre del documento, lo firma digitalmente con KMS
+    private static async Task<string> signDoc(AmazonKeyManagementServiceClient client, string doc)
     {
-      if (envVar is null || envVar.Length == 0){
-        Console.WriteLine("invalid environment variable: {0}", envVar);
+      // toma el nombre del archivo sin extension. ej: de 'message.txt' devuelve 'message'
+      var fName = doc.Split('.')[0];
+
+      // asume que el documento esta localmente
+      string fPath = Path.Combine(Environment.CurrentDirectory, doc);
+      validateFilePath(fPath);
+      FileStream fs = File.OpenRead(fPath);
+      Console.WriteLine("documento: {0}, leido satisfactoriamente", fPath);
+
+      // hash doc
+      SHA256 sha256 = SHA256.Create();
+      byte[] digestBin = sha256.ComputeHash(fs);
+      
+      // crea el archivo binario con el hash del documento
+      var hashBinFile = $"{fName}-{digestDocExtension}";
+      var hashBinFilePath = Path.Combine(Environment.CurrentDirectory, hashBinFile);
+      using (BinaryWriter bw = new BinaryWriter(File.OpenWrite(hashBinFilePath)))
+      {
+        bw.Write(digestBin);
+        bw.Close();
+      }
+      Console.WriteLine("documento: {0} creado satisfactoriamente", hashBinFilePath);
+
+      // sign doc
+      var req = new SignRequest
+      {
+        KeyId = KMSKeyId,
+        Message = new MemoryStream(digestBin),
+        MessageType = messageType,
+        SigningAlgorithm = SignAlgorithm,
+      };
+
+      try
+      {
+        var response = await client.SignAsync(req);
+        var signature = response.Signature;
+        Console.WriteLine("el documento: {0} fue satisfactoriamente firmado con la clave: {1} con el algoritmo: {2}", doc, response.KeyId, response.SigningAlgorithm);
+        
+        var signBinFile = $"{fName}-{signatureDocExtension}";
+        var signBinFilePath = Path.Combine(Environment.CurrentDirectory, signBinFile);
+        using (FileStream signBinFs = new FileStream(signBinFilePath, FileMode.Create, FileAccess.Write))
+        {
+          signature.WriteTo(signBinFs);
+          signBinFs.Close();
+        }
+        Console.WriteLine("la firma: {0} fue creada satisfactoriamente", signBinFilePath);
+      }
+      catch(Exception e)
+      {
+        throw;
+      }
+
+      return "Done";
+    }
+
+    /// dado el nombre del documento, verifica que la firma sea valida
+    private static async Task verifyDocSignature(AmazonKeyManagementServiceClient client, string doc)
+    {
+      string digestFile = $"{doc}-{digestDocExtension}";
+      string digestFilePath = Path.Combine(Environment.CurrentDirectory, digestFile);
+      validateFilePath(digestFilePath);
+      MemoryStream digest = new MemoryStream();
+      readBinFileToMemStream(digestFilePath, ref digest);
+
+      string signatureFile = $"{doc}-{signatureDocExtension}";
+      string signatureFilePath = Path.Combine(Environment.CurrentDirectory, signatureFile);
+      validateFilePath(signatureFilePath);
+      MemoryStream signature = new MemoryStream();
+      readBinFileToMemStream(digestFilePath, ref signature);
+
+      var req = new VerifyRequest
+      {
+        KeyId = KMSKeyId,
+        Message = digest,
+        MessageType = messageType,
+        Signature = signature,
+        SigningAlgorithm = SignAlgorithm,
+      };
+      try
+      {
+        var response = await client.VerifyAsync(req);
+        if (response.SignatureValid) {
+          Console.WriteLine("la firma: {0} para el documento {1} es valida", signatureFile, doc);
+        }
+        else {
+          Console.WriteLine("la firma: {0} para el documento {1} es invalida", signatureFile, doc);
+        } 
+      }
+      catch(Exception e)
+      {
+        throw;
+      }
+    }
+    
+    /// valida el file path
+    private static void validateFilePath(string path)
+    {
+      if (!File.Exists(path)){
+        Console.WriteLine("documento: {0}, no existe", path);
         Environment.Exit(1);
       }
+    }
+
+    /// verifica que la env var sea valida
+    private static void validateEnvVar(string? envVar)
+    {
+      if (envVar is null || envVar.Length == 0){
+        Console.WriteLine("variable de entorno: {0}, no valida", envVar);
+        Environment.Exit(1);
+      }
+    }
+    
+    /// lee el archivo binario y almacena contenido en el memorystream adjunto
+    private static void readBinFileToMemStream(string filePath, ref MemoryStream ms){
+      FileStream fs = File.OpenRead(filePath);
+      fs.CopyTo(ms);
     }
   }    
 }
