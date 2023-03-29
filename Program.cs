@@ -27,11 +27,9 @@ namespace dotnetSignDocExample
       var client = new AmazonKeyManagementServiceClient();
 
       Task<string> sd = signDoc(client, "message.txt");
-      // Task<string> vs = verifyDocSignature(client, "message.txt");
-      
       _ = await sd;
-      // Thread.Sleep(10000);
-      // _ = await vs;
+      Task<string> vds = verifyDocSignature(client, "message.txt");
+      _ = await vds;
     }
 
     /// dado el nombre del documento, lo firma digitalmente con KMS
@@ -44,7 +42,6 @@ namespace dotnetSignDocExample
       string fPath = Path.Combine(Environment.CurrentDirectory, doc);
       validateFilePath(fPath);
       FileStream fs = File.OpenRead(fPath);
-      Console.WriteLine("documento: {0}, leido satisfactoriamente", fPath);
 
       // hash doc
       SHA256 sha256 = SHA256.Create();
@@ -56,7 +53,6 @@ namespace dotnetSignDocExample
       using (BinaryWriter bw = new BinaryWriter(File.OpenWrite(hashBinFilePath)))
       {
         bw.Write(digestBin);
-        bw.Close();
       }
       Console.WriteLine("documento: {0} creado satisfactoriamente", hashBinFilePath);
 
@@ -80,7 +76,6 @@ namespace dotnetSignDocExample
         using (FileStream signBinFs = new FileStream(signBinFilePath, FileMode.Create, FileAccess.Write))
         {
           signature.WriteTo(signBinFs);
-          signBinFs.Close();
         }
         Console.WriteLine("la firma: {0} fue creada satisfactoriamente", signBinFilePath);
       }
@@ -101,22 +96,20 @@ namespace dotnetSignDocExample
       string digestFile = $"{fName}-{digestDocExtension}";
       string digestFilePath = Path.Combine(Environment.CurrentDirectory, digestFile);
       validateFilePath(digestFilePath);
-      MemoryStream digest = new MemoryStream();
-      readBinFileToMemStream(digestFilePath, ref digest);
+      byte [] digestFileBin = File.ReadAllBytes(digestFilePath);
 
       string signatureFile = $"{fName}-{signatureDocExtension}";
       string signatureFilePath = Path.Combine(Environment.CurrentDirectory, signatureFile);
       validateFilePath(signatureFilePath);
-      MemoryStream signature = new MemoryStream();
-      readBinFileToMemStream(digestFilePath, ref signature);
+      byte [] signatureFileBin = File.ReadAllBytes(signatureFilePath);
 
       var req = new VerifyRequest
       {
         KeyId = KMSKeyId,
-        Message = digest,
-        MessageType = messageType,
-        Signature = signature,
         SigningAlgorithm = SignAlgorithm,
+        MessageType = messageType,
+        Message = new MemoryStream(digestFileBin),
+        Signature = new MemoryStream(signatureFileBin),
       };
       try
       {
@@ -152,12 +145,6 @@ namespace dotnetSignDocExample
         Console.WriteLine("variable de entorno: {0}, no valida", envVar);
         Environment.Exit(1);
       }
-    }
-    
-    /// lee el archivo binario y almacena contenido en el memorystream adjunto
-    private static void readBinFileToMemStream(string filePath, ref MemoryStream ms){
-      FileStream fs = File.OpenRead(filePath);
-      fs.CopyTo(ms);
     }
   }    
 }
