@@ -27,8 +27,11 @@ namespace dotnetSignDocExample
       var client = new AmazonKeyManagementServiceClient();
 
       Task<string> sd = signDoc(client, "message.txt");
+      // Task<string> vs = verifyDocSignature(client, "message.txt");
+      
       _ = await sd;
-      // verifyDocSignature(client, "message.txt");
+      // Thread.Sleep(10000);
+      // _ = await vs;
     }
 
     /// dado el nombre del documento, lo firma digitalmente con KMS
@@ -81,7 +84,7 @@ namespace dotnetSignDocExample
         }
         Console.WriteLine("la firma: {0} fue creada satisfactoriamente", signBinFilePath);
       }
-      catch(Exception e)
+      catch (Exception)
       {
         throw;
       }
@@ -90,15 +93,18 @@ namespace dotnetSignDocExample
     }
 
     /// dado el nombre del documento, verifica que la firma sea valida
-    private static async Task verifyDocSignature(AmazonKeyManagementServiceClient client, string doc)
+    private static async Task<string> verifyDocSignature(AmazonKeyManagementServiceClient client, string doc)
     {
-      string digestFile = $"{doc}-{digestDocExtension}";
+      // toma el nombre del archivo sin extension. ej: de 'message.txt' devuelve 'message'
+      var fName = doc.Split('.')[0];
+
+      string digestFile = $"{fName}-{digestDocExtension}";
       string digestFilePath = Path.Combine(Environment.CurrentDirectory, digestFile);
       validateFilePath(digestFilePath);
       MemoryStream digest = new MemoryStream();
       readBinFileToMemStream(digestFilePath, ref digest);
 
-      string signatureFile = $"{doc}-{signatureDocExtension}";
+      string signatureFile = $"{fName}-{signatureDocExtension}";
       string signatureFilePath = Path.Combine(Environment.CurrentDirectory, signatureFile);
       validateFilePath(signatureFilePath);
       MemoryStream signature = new MemoryStream();
@@ -122,10 +128,12 @@ namespace dotnetSignDocExample
           Console.WriteLine("la firma: {0} para el documento {1} es invalida", signatureFile, doc);
         } 
       }
-      catch(Exception e)
+      catch (Exception)
       {
         throw;
       }
+
+      return "Done";
     }
     
     /// valida el file path
