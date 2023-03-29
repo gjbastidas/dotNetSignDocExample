@@ -1,10 +1,18 @@
+# eSign document using AWS KMS
+
+Example of digitally signing a document using AWS KMS and AWS .NET SDK
+
+## Load environment variables 
+
+Application variables
 ```shell
-dotnet new console --name dotnetSignDocument
-dotnet add package AWSSDK.KeyManagementService
+export KMS_KEY_ID="<replace with KMS key alias or ARN>"
+export KMS_SIGNING_ALG="<replace with signing algoritm>" #example: ECDSA_SHA_256
+```
 
-export AWS_PROFILE="default"
-export KMS_KEY_ID="alias/test-firmar-docs"
-export KMS_SIGNING_ALG="ECDSA_SHA_256"
+You also need to export the respective AWS credentials.
 
+## Run app
+```
 dotnet run
 ```
